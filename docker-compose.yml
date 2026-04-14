@@ -1,0 +1,10 @@
+services:
+  smtp-relay:
+    image: ghcr.io/<your-username>/simple-login-smtp-relay:latest
+    container_name: smtp-relay
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+    env_file: .env
+    volumes:
+      - ./certs:/certs:ro
