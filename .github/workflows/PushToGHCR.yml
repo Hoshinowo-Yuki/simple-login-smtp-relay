@@ -1,0 +1,90 @@
+name: Build and push the image to GitHub Container registry (GHCR)
+
+on:
+  push:
+    branches:
+      - master  # The current branch (hardcoded)
+
+jobs:
+  build_and_push:
+    if: github.event_name == 'push' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - 
+        name: Convert variables to lowercase  # Docker does not accept any uppercase letters
+        run: |
+          echo "REPO_LOWERCASE=${GITHUB_REPOSITORY,,}" >> ${GITHUB_ENV}
+          echo "BRANCH_LOWERCASE=${GITHUB_REF_NAME,,}" >> ${GITHUB_ENV}
+      - 
+        name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO_LOWERCASE }}:latest
+            ghcr.io/${{ env.REPO_LOWERCASE }}:v${{ vars.RELEASE_MAJOR }}.${{ vars.RELEASE_MINOR }}
+
+  update_version:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    needs: build_and_push
+    steps:
+      - name: Check and update RELEASE_MINOR and RELEASE_MAJOR versions
+        id: update_versions
+        run: |
+          RELEASE_MINOR=$(echo "${{ vars.RELEASE_MINOR }}" | awk '{print $1}')
+          RELEASE_MAJOR=$(echo "${{ vars.RELEASE_MAJOR }}" | awk '{print $1}')
+          if (( $(echo "$RELEASE_MINOR > 9.9" | bc -l) )); then
+            NEW_RELEASE_MINOR="0.0"
+            NEW_RELEASE_MAJOR=$(echo "$RELEASE_MAJOR + 1" | bc)
+          else
+            NEW_RELEASE_MINOR=$(echo "$RELEASE_MINOR + 0.1" | bc)
+            NEW_RELEASE_MAJOR="$RELEASE_MAJOR"
+          fi
+          NEW_RELEASE_MINOR=$(printf "%.1f" $NEW_RELEASE_MINOR)
+          echo "NEW_RELEASE_MINOR=$NEW_RELEASE_MINOR" >> $GITHUB_ENV
+          echo "NEW_RELEASE_MAJOR=$NEW_RELEASE_MAJOR" >> $GITHUB_ENV
+      -
+        name: Update version
+        run: |
+          gh variable set 'RELEASE_MINOR' --body ${{ env.NEW_RELEASE_MINOR }} --repo ${{ github.repository }}
+          gh variable set 'RELEASE_MAJOR' --body ${{ env.NEW_RELEASE_MAJOR }} --repo ${{ github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+
+      - 
+        name: Verify the version number is updated for the next build
+        run: |
+          UPCOMING_RELEASE_MINOR=$(gh variable get 'RELEASE_MINOR' --repo ${{ github.repository }} | awk '{print $1}')
+          UPCOMING_RELEASE_MAJOR=$(gh variable get 'RELEASE_MAJOR' --repo ${{ github.repository }} | awk '{print $1}')
+          if [ "${UPCOMING_RELEASE_MINOR}" != "${{ env.NEW_RELEASE_MINOR }}" ]; then
+            echo "ERROR: Failed to bump the minor version. Please check the secret pane!" >&2
+            exit 1
+          elif [ "${UPCOMING_RELEASE_MAJOR}" != "${{ env.NEW_RELEASE_MAJOR }}" ]; then
+            echo "ERROR: Failed to bump the major version. Please check the secret pane!" >&2
+            exit 1
+          else
+            echo "Successfully bumped the version. The version for next release will be '${UPCOMING_RELEASE_MAJOR}.${UPCOMING_RELEASE_MINOR}'."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+
+  
