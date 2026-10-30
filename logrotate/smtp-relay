@@ -1,5 +1,5 @@
-# Copy to /etc/logrotate.d/smtp-relay on the VPS.
-/opt/smtp-relay/logs/postfix.log {
+# Template — install with ./install-host-config.sh (fills in @STACK_DIR@).
+@STACK_DIR@/logs/postfix.log {
     weekly
     rotate 8
     compress

@@ -39,7 +39,8 @@ never blocks other connections. Unknown senders are remembered for 5 minutes.
 | `postfix/Dockerfile`, `postfix/entrypoint.sh` | yes | Postfix image; config is assembled at start |
 | `postfix/config/main.cf` | yes | Postfix settings (no secrets) |
 | `postfix/manage-logins.sh` | yes | Add / remove / list sender logins |
-| `fail2ban/`, `logrotate/` | yes | Host-side config to copy into `/etc` |
+| `fail2ban/`, `logrotate/` | yes | Host-side config templates (`@STACK_DIR@` = where the repo lives) |
+| `install-host-config.sh` | yes | Fills in the path and installs those into `/etc`, checks them, restarts fail2ban |
 | `.env` ← `.env.example` | **no** | `MYHOSTNAME` |
 | `relay.env` ← `relay.env.example` | **no** | Relay script settings: SimpleLogin API key, upstream login, internal login |
 | `secrets/relay_login` ← `.example` | **no** | Postfix's login to the script (matches `relay.env`) |
@@ -57,7 +58,7 @@ never blocks other connections. Unknown senders are remembered for 5 minutes.
 ## Setup
 
 ```bash
-cd /opt/smtp-relay
+cd smtp-relay                                          # wherever you cloned it; any path works
 cp .env.example .env                                   # set MYHOSTNAME
 cp relay.env.example relay.env                         # SimpleLogin + upstream + internal login
 cp secrets/relay_login.example secrets/relay_login     # same internal login as relay.env
@@ -89,10 +90,12 @@ docker exec smtp-postfix postfix reload
 ## fail2ban and log rotation
 
 ```bash
-sudo cp fail2ban/jail.d/smtp-relay.local /etc/fail2ban/jail.d/
-sudo cp logrotate/smtp-relay /etc/logrotate.d/
-sudo systemctl restart fail2ban && sudo fail2ban-client status smtp-relay
+sudo ./install-host-config.sh
 ```
+
+The templates contain no fixed path; the script fills in the repo's own location, so the stack can
+live anywhere. Re-run it after any `git pull` that changes `fail2ban/` or `logrotate/`. Don't copy
+the templates into `/etc` by hand — they'd keep the `@STACK_DIR@` placeholder.
 
 ## Client settings
 

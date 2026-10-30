@@ -1,11 +1,10 @@
-# Copy to /etc/fail2ban/jail.d/smtp-relay.local on the VPS.
+# Template — install with ./install-host-config.sh (fills in @STACK_DIR@).
 # Bans IPs with repeated failed logins on the submission port (587).
-# Adjust logpath if the stack doesn't live in /opt/smtp-relay.
 [smtp-relay]
 enabled  = true
 filter   = postfix[mode=auth]
 port     = submission
-logpath  = /opt/smtp-relay/logs/postfix.log
+logpath  = @STACK_DIR@/logs/postfix.log
 backend  = auto
 maxretry = 5
 findtime = 10m
