@@ -12,17 +12,23 @@ postconf -e "myhostname = $MYHOSTNAME" \
             "smtpd_tls_key_file = $CERT_DIR/privkey.pem"
 
 # --- master.cf ------------------------------------------------------------------
-# No chroot (simpler in a container); no port 25 listener; submission on 587 only.
+# No chroot (simpler in a container); no port 25 listener.
+# Two identical submission listeners:
+#   submission  (587) STARTTLS, required before anything else
+#   submissions (465) implicit TLS from the first byte (smtpd_tls_wrappermode)
 postconf -F '*/*/chroot = n'
 postconf -MX smtp/inet 2>/dev/null || true
-postconf -M  submission/inet="submission inet n - n - - smtpd"
-postconf -P  "submission/inet/syslog_name=postfix/submission" \
-             "submission/inet/smtpd_tls_security_level=encrypt" \
-             "submission/inet/smtpd_sasl_auth_enable=yes" \
-             "submission/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject" \
-             "submission/inet/smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject" \
-             "submission/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject" \
-             "submission/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject"
+for svc in submission submissions; do
+  postconf -M  "$svc/inet=$svc inet n - n - - smtpd"
+  postconf -P  "$svc/inet/syslog_name=postfix/$svc" \
+               "$svc/inet/smtpd_tls_security_level=encrypt" \
+               "$svc/inet/smtpd_sasl_auth_enable=yes" \
+               "$svc/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject" \
+               "$svc/inet/smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject" \
+               "$svc/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject" \
+               "$svc/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject"
+done
+postconf -P "submissions/inet/smtpd_tls_wrappermode=yes"
 
 # --- Logins: Cyrus SASL with a sasldb in the sasl-db volume -----------------------
 mkdir -p /etc/postfix/sasl /var/lib/sasl

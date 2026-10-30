@@ -1,9 +1,9 @@
 # Template — install with ./install-host-config.sh (fills in @STACK_DIR@).
-# Bans IPs with repeated failed logins on the submission port (587).
+# Bans IPs with repeated failed logins on the submission ports (587 STARTTLS, 465 implicit TLS).
 [smtp-relay]
 enabled  = true
 filter   = postfix[mode=auth]
-port     = submission
+port     = submission,submissions
 logpath  = @STACK_DIR@/logs/postfix.log
 backend  = auto
 maxretry = 5

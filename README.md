@@ -1,11 +1,11 @@
 # SimpleLogin SMTP relay with a Postfix front end
 
-A public SMTP submission relay (port 587) for apps and servers that need to send mail
+A public SMTP submission relay (ports 587 and 465) for apps and servers that need to send mail
 **as your SimpleLogin aliases**. Postfix is the public edge; the SimpleLogin relay script
 does the reverse-alias work behind it.
 
 ```
-senders ──587 (STARTTLS + login)──► Postfix ──127.0.0.1:8025──► relay script ──► upstream mailbox ──► SimpleLogin ──► recipient
+senders ──587 STARTTLS / 465 TLS + login──► Postfix ──127.0.0.1:8025──► relay script ──► upstream mailbox ──► SimpleLogin ──► recipient
 ```
 
 | Part | Job |
@@ -56,7 +56,7 @@ There are no published images: both are built from this repo on your own host
 - Docker with the compose plugin
 - A DNS name (e.g. `smtp.example.com`) pointing at the host — **not proxied** if you use Cloudflare
 - A certificate for that name in `/etc/letsencrypt/live/<name>/` (e.g. certbot with the Cloudflare DNS plugin)
-- Firewall: allow **587/tcp** (IPv4 + IPv6); keep 25 and 8025 closed
+- Firewall: allow **587/tcp** and **465/tcp** (IPv4 + IPv6); keep 25 and 8025 closed
 
 ## Setup
 
@@ -105,9 +105,12 @@ the templates into `/etc` by hand — they'd keep the `@STACK_DIR@` placeholder.
 | Setting | Value |
 | --- | --- |
 | Server | `smtp.example.com` (always the name, never the IP) |
-| Port | `587`, STARTTLS |
+| Port | `587` with STARTTLS, **or** `465` with implicit TLS (same logins and rules) |
 | Login | that sender's own login (e.g. `relay-nextcloud`) |
 | From | an address listed for that login in `sender_login` |
+
+Many apps call these "STARTTLS" vs "SSL/TLS". In Nodemailer-based apps (e.g. Twikoo),
+`secure: false` + port 587 = STARTTLS, `secure: true` + port 465 = implicit TLS; mixing them fails.
 
 Clients should verify the certificate, so a stale DNS entry or a reassigned IP can never collect
 their password. For a Postfix client:
@@ -131,6 +134,7 @@ swaks $H --tls --auth LOGIN --auth-user relay-x --quit-after AUTH               
 swaks $H --tls --auth LOGIN --auth-user relay-x --from other@example.com --to t@example.org --quit-after RCPT
 swaks $H --tls --from x@example.com --to t@example.org --quit-after RCPT                                   # no login
 swaks $H --auth LOGIN --auth-user relay-x --quit-after AUTH                                                # no TLS
+swaks --server smtp.example.com --port 465 --tlsc --auth LOGIN --auth-user relay-x --from x@example.com --to t@example.org --quit-after RCPT   # implicit TLS
 ```
 
 | Test | Expected |
@@ -140,6 +144,7 @@ swaks $H --auth LOGIN --auth-user relay-x --quit-after AUTH                     
 | Correct login, another address as sender | `553 5.7.1 … not owned by user` |
 | No login | `554 5.7.1 … Client host rejected: Access denied` |
 | `AUTH` before `STARTTLS` | not offered |
+| Port 465 with `--tlsc` | TLS handshake first, then the same results as 587 |
 | Port 25 / 8025 from outside | closed / filtered |
 
 Check fail2ban recognises failures in this log format:
@@ -153,7 +158,7 @@ fail2ban-regex logs/postfix.log 'postfix[mode=auth]' | grep -E "^Lines|Failregex
 Ports published by Docker (`ports:`) bypass `ufw`, because Docker inserts its own rules ahead of it.
 The relay script is published on `127.0.0.1` only, so it is never reachable from outside, and Postfix
 uses the host network (so `ufw` does apply to it). For anything else on the host, prefer a firewall
-outside the VM (e.g. your provider's cloud firewall). Allow `587/tcp` for IPv4 and IPv6.
+outside the VM (e.g. your provider's cloud firewall). Allow `587/tcp` and `465/tcp` for IPv4 and IPv6.
 
 ## Troubleshooting
 
