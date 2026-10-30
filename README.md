@@ -48,6 +48,9 @@ never blocks other connections. Unknown senders are remembered for 5 minutes.
 | Docker volume `sasl-db` | — | Sender logins (Cyrus sasldb; root-only, passwords stored in plain form inside the volume) |
 | Docker volume `postfix-spool` | — | Mail queue |
 
+There are no published images: both are built from this repo on your own host
+(`docker compose up -d --build`), so what runs is always exactly what you've read.
+
 ## Requirements
 
 - Docker with the compose plugin
