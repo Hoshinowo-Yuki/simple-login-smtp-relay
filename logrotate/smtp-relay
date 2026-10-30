@@ -1,4 +1,4 @@
-# Template — install with ./install-host-config.sh (fills in @STACK_DIR@).
+# Template — install with ./install-host-config.sh, which fills in the stack path.
 @STACK_DIR@/logs/postfix.log {
     weekly
     rotate 8

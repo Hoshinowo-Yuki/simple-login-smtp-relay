@@ -1,4 +1,4 @@
-# Template — install with ./install-host-config.sh (fills in @STACK_DIR@).
+# Template — install with ./install-host-config.sh, which fills in the stack path.
 # Bans IPs with repeated failed logins on the submission ports (587 STARTTLS, 465 implicit TLS).
 [smtp-relay]
 enabled  = true
