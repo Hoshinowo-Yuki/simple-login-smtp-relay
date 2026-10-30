@@ -66,12 +66,15 @@ def validate_config():
         "RELAY_USERNAME": RELAY_USERNAME,
         "RELAY_PASSWORD": RELAY_PASSWORD,
         "SL_API_KEY": SL_API_KEY,
-        "UPSTREAM_USERNAME": UPSTREAM_USERNAME,
-        "UPSTREAM_PASSWORD": UPSTREAM_PASSWORD,
     }
     missing = [k for k, v in required.items() if not v]
     if missing:
         logger.error(f"Missing required env vars: {', '.join(missing)}")
+        sys.exit(1)
+    # The upstream login is optional (none for direct delivery via the local Postfix),
+    # but a username without a password (or the reverse) is a mistake.
+    if bool(UPSTREAM_USERNAME) != bool(UPSTREAM_PASSWORD):
+        logger.error("Set both UPSTREAM_USERNAME and UPSTREAM_PASSWORD, or neither")
         sys.exit(1)
     if TLS_ENABLED and (not TLS_CERT or not TLS_KEY):
         logger.error("TLS_ENABLED=true but TLS_CERT or TLS_KEY not set")
@@ -193,7 +196,8 @@ class RelayHandler:
                 if UPSTREAM_STARTTLS:
                     client.starttls()
                     client.ehlo()
-                client.login(UPSTREAM_USERNAME, UPSTREAM_PASSWORD)
+                if UPSTREAM_USERNAME:
+                    client.login(UPSTREAM_USERNAME, UPSTREAM_PASSWORD)
                 return client.sendmail(mail_from, rcpts, data)
         except smtplib.SMTPAuthenticationError as e:
             # wrong upstream credentials: a config problem, keep the mail and retry
@@ -252,6 +256,7 @@ def main():
     controller.start()
     logger.info(f"Listening on {RELAY_HOST}:{RELAY_PORT}")
     logger.info(f"Upstream: {UPSTREAM_HOST}:{UPSTREAM_PORT} (STARTTLS={'on' if UPSTREAM_STARTTLS else 'off'})"
+                f" login={'yes' if UPSTREAM_USERNAME else 'none'}"
                 f" sending as {UPSTREAM_FROM or 'the original sender'}")
     logger.info(f"TLS: {'enabled' if TLS_ENABLED else 'disabled'}")
     logger.info(f"Timeouts: DATA={DATA_TIMEOUT}s UPSTREAM={UPSTREAM_TIMEOUT}s SL_API={SL_API_TIMEOUT}s")

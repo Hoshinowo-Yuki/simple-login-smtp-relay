@@ -1,24 +1,31 @@
 # SimpleLogin SMTP relay, fronted by Postfix
 #
-#   senders ──587 (TLS + login)──► postfix (host network)
-#                                     │  127.0.0.1:8025 (internal login)
-#                                     ▼
-#                                  smtp-relay (relay/server.py: SimpleLogin reverse aliases)
-#                                     │
-#                                     ▼
-#                                  upstream mailbox ──► SimpleLogin ──► recipient
+#   senders ──587/465 (TLS + login)──► postfix (host network)
+#                                        │  content_filter → 127.0.0.1:8025 (internal login)
+#                                        ▼
+#                                     smtp-relay (relay/server.py: SimpleLogin reverse aliases)
+#                                        │
+#                     ┌──────────────────┴───────────────────┐
+#                     ▼                                      ▼
+#        external upstream mailbox            direct delivery: back into postfix on
+#        (UPSTREAM_HOST = a provider)         127.0.0.1:10026 → DKIM-signed (opendkim)
+#                     │                         → SimpleLogin's MX on port 25
+#                     └──────────────────┬───────────────────┘
+#                                        ▼
+#                                SimpleLogin ──► recipient
 #
 # Secrets live only in gitignored files: .env, relay.env, secrets/relay_login,
-# postfix/config/sender_login, and the SASL user database (Docker volume).
+# postfix/config/sender_login, dkim/ (DKIM key), and the SASL user database (Docker volume).
 
 services:
   smtp-relay:
     build: ./relay                # server.py + utils.py, built locally
     container_name: smtp-relay
     restart: unless-stopped
+    network_mode: host            # reaches postfix's 127.0.0.1:10026 for direct delivery
     env_file: relay.env
-    ports:
-      - "127.0.0.1:8025:8025"     # loopback only: reachable by Postfix, not the internet
+    environment:
+      RELAY_HOST: 127.0.0.1       # loopback only: reachable by Postfix, not the internet
 
   postfix:
     build: ./postfix
@@ -27,6 +34,8 @@ services:
     network_mode: host            # sees real client IPs (IPv4 + IPv6) for limits and fail2ban
     environment:
       MYHOSTNAME: ${MYHOSTNAME:?set MYHOSTNAME in .env}
+      DKIM_SELECTOR: ${DKIM_SELECTOR:-}            # set = sign direct-delivery mail
+      OUTBOUND_IPV4_ONLY: ${OUTBOUND_IPV4_ONLY:-no}
     volumes:
       - ./postfix/config:/config:ro             # main.cf, sender_login
       - ./secrets:/secrets:ro                   # relay_login (Postfix -> script)
@@ -36,6 +45,19 @@ services:
       - sasl-db:/var/lib/sasl                   # sender logins (Cyrus sasldb, root-only volume)
     depends_on:
       - smtp-relay
+      - opendkim
+
+  opendkim:
+    build: ./opendkim
+    container_name: smtp-opendkim
+    restart: unless-stopped
+    network_mode: host            # signs on 127.0.0.1:8891 for postfix
+    environment:
+      MYHOSTNAME: ${MYHOSTNAME:?set MYHOSTNAME in .env}
+      DKIM_SELECTOR: ${DKIM_SELECTOR:-}            # unset = idle (no signing)
+      DKIM_DOMAIN: ${DKIM_DOMAIN:-}                # default: MYHOSTNAME
+    volumes:
+      - ./dkim:/keys                            # <selector>.private / .txt (gitignored)
 
 volumes:
   postfix-spool: {}

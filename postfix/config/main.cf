@@ -13,12 +13,18 @@ alias_database =
 biff = no
 append_dot_mydomain = no
 
-# --- Next hop: the SimpleLogin relay script (loopback only) -------------------
-relayhost = [127.0.0.1]:8025
-smtp_sasl_auth_enable = yes
-smtp_sasl_password_maps = texthash:/etc/postfix/relay_login
-smtp_sasl_security_options = noanonymous
-smtp_tls_security_level = none
+# --- Mail flow ---------------------------------------------------------------
+# Mail from senders (587/465) goes to the SimpleLogin relay script via the
+# "relayscript" transport (content_filter, set in master.cf by entrypoint.sh).
+# The script sends to its upstream: an external mailbox, or back into this Postfix
+# on 127.0.0.1:10026 for direct delivery (DKIM-signed) to SimpleLogin's servers.
+# There is no global relayhost: anything delivered by this Postfix itself
+# (mail from 10026, bounce notices) goes straight to the recipient domain's MX.
+relayhost =
+smtp_tls_security_level = may
+smtp_tls_loglevel = 1
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_helo_name = $myhostname
 
 # --- Incoming: TLS ------------------------------------------------------------
 smtpd_tls_security_level = may
@@ -56,8 +62,8 @@ smtpd_banner = $myhostname ESMTP
 
 # --- Queue --------------------------------------------------------------------
 maximal_queue_lifetime = 7d
-# Bounce notices have an empty sender, which the relay script can't map to an
-# alias; don't keep retrying them.
+# Bounce notices go straight to the sender's alias (direct delivery); don't keep
+# retrying them for long.
 bounce_queue_lifetime = 1h
 
 # --- Logging (read by fail2ban on the host) ----------------------------------

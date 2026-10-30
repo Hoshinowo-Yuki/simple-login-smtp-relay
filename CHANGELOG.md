@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Direct delivery: the relay script can hand rewritten mail back to Postfix on
+  `127.0.0.1:10026`, which delivers it straight to SimpleLogin's servers on port 25. No
+  external mailbox is needed. See README "Direct delivery".
+- OpenDKIM service (`opendkim/`) to sign direct-delivery mail. `docker compose run --rm
+  opendkim genkey` creates the key and prints the DNS record; `showkey` prints it again. It
+  idles when `DKIM_SELECTOR` is not set. If it is unreachable, Postfix defers mail instead of
+  sending it unsigned.
+- `.env` settings `DKIM_SELECTOR`, `DKIM_DOMAIN` (default `MYHOSTNAME`) and
+  `OUTBOUND_IPV4_ONLY`.
+
+### Changed
+
+- Postfix passes mail from senders to the script with a `content_filter` on 587/465, instead
+  of a global `relayhost`. Mail Postfix sends itself (re-injected mail, bounce notices) goes
+  directly to the recipient domain's mail servers.
+- Bounce notices are now delivered directly to the sender's alias instead of being refused by
+  the script. This needs outbound port 25; without it they expire after an hour, as before.
+- The relay script runs on the host network, bound to `127.0.0.1` (set by
+  `docker-compose.yml`), so it can reach Postfix's loopback port. It is still unreachable from
+  outside.
+- The upstream login is optional: set both `UPSTREAM_USERNAME` and `UPSTREAM_PASSWORD`, or
+  neither.
+
 ## [2.1.0] - 2026-10-30
 
 ### Added
@@ -118,7 +143,7 @@ Deployment is now a `docker compose` stack built from source.
 - Container image built by GitHub Actions and published to GHCR.
 - License.
 
-[Unreleased]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.1.0...HEAD
 [2.1.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/OWNER/simple-login-smtp-relay/releases/tag/v1.0.0

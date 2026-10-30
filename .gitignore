@@ -5,3 +5,4 @@ secrets/*
 !secrets/*.example
 postfix/config/sender_login
 logs/
+dkim/

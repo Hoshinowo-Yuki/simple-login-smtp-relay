@@ -5,17 +5,23 @@ A public SMTP submission relay (ports 587 and 465) for apps and servers that nee
 does the reverse-alias work behind it.
 
 ```
-senders ──587 STARTTLS / 465 TLS + login──► Postfix ──127.0.0.1:8025──► relay script ──► upstream mailbox ──► SimpleLogin ──► recipient
+senders ──587 STARTTLS / 465 TLS + login──► Postfix ──127.0.0.1:8025──► relay script ──► upstream ──► SimpleLogin ──► recipient
 ```
+
+The upstream is either an external mailbox (any SMTP account), or **direct delivery**: the script
+hands the mail back to Postfix on `127.0.0.1:10026`, which DKIM-signs it and delivers it straight
+to SimpleLogin's servers on port 25, with no third-party mailbox involved.
 
 | Part | Job |
 | --- | --- |
 | **Postfix** (`postfix/`) | TLS, one login per sender, "this login may only send as these addresses", rate limits, queue + retries, logs for fail2ban |
-| **Relay script** (`relay/`) | Looks up each recipient's SimpleLogin reverse alias, rewrites `To`/`Cc`, sends via the upstream mailbox |
+| **Relay script** (`relay/`) | Looks up each recipient's SimpleLogin reverse alias, rewrites `To`/`Cc`, sends via the upstream |
+| **OpenDKIM** (`opendkim/`) | Direct delivery only: signs outgoing mail with your DKIM key (idles otherwise) |
 
-Postfix never sends to reverse aliases itself — it hands each message, with the original
-sender and recipients, to the script, and only removes it from its queue once the script
-answers `250`. On `4xx` it retries (up to 7 days).
+Postfix hands each message from a sender, with the original sender and recipients, to the
+script (a `content_filter` on 587/465), and only removes it from its queue once the script
+answers `250`. On `4xx` it retries (up to 7 days). With direct delivery, the rewritten message
+comes back on `127.0.0.1:10026` and Postfix queues and delivers it like any outgoing mail.
 
 ## Relay script behaviour
 
@@ -60,22 +66,72 @@ Recipients always see the alias: SimpleLogin rewrites the sender when it forward
 > that Proton account), the provider sees its own sent message coming back and won't show it in
 > the inbox. Use a separate account for sending, such as a dedicated Gmail.
 
+## Direct delivery
+
+The relay can deliver straight to SimpleLogin instead of using an external mailbox. Every
+message goes to a reverse alias, so the only server that ever receives mail from the relay is
+SimpleLogin's. A big provider's sending reputation isn't needed; correct authentication is.
+
+Requirements (shown for `MYHOSTNAME=smtp.example.com`, the same name everywhere):
+
+| Item | Value |
+| --- | --- |
+| Outbound port 25 | Open on your host (many clouds block it until you ask) |
+| Reverse DNS | Both server IPs (v4 and v6) → `smtp.example.com` (matching A/AAAA) |
+| SPF | TXT `smtp.example.com`: `v=spf1 ip4:<v4> ip6:<v6> -all` |
+| DKIM | TXT `<selector>._domainkey.smtp.example.com`, printed by `genkey` |
+| DMARC | TXT `_dmarc.smtp.example.com`: start with `v=DMARC1; p=none; adkim=s; aspf=s`, then `p=reject` once mail passes |
+| SimpleLogin | `relay@smtp.example.com` as an **authorized address** on your aliases' mailbox |
+
+Setup:
+
+```bash
+# .env
+DKIM_SELECTOR=relay
+#OUTBOUND_IPV4_ONLY=yes      # if your IPv6 address has no reverse DNS yet
+
+docker compose build opendkim
+docker compose run --rm opendkim genkey     # prints the DKIM DNS record to add
+```
+
+`relay.env`:
+
+```
+UPSTREAM_HOST=127.0.0.1
+UPSTREAM_PORT=10026
+UPSTREAM_USERNAME=
+UPSTREAM_PASSWORD=
+UPSTREAM_STARTTLS=false
+UPSTREAM_FROM=relay@smtp.example.com
+```
+
+Then `docker compose up -d --build`. Check a delivered message's headers at the recipient:
+`spf=pass`, `dkim=pass` (`d=smtp.example.com`) and `dmarc=pass`.
+
+- If OpenDKIM is down, Postfix defers the mail (`milter_default_action = tempfail`) instead of
+  sending it unsigned.
+- Bounce notices are delivered directly too (to the sender's alias), signed the same way.
+- `docker compose run --rm opendkim showkey` prints the DNS record again. To rotate the key, use
+  a new selector, publish its record, switch `DKIM_SELECTOR`, then remove the old record.
+
 ## Files
 
 | Path | In git? | Purpose |
 | --- | --- | --- |
-| `docker-compose.yml` | yes | Both services |
+| `docker-compose.yml` | yes | All three services (Postfix, relay script, OpenDKIM), host network |
 | `relay/server.py`, `relay/utils.py` | yes | The SimpleLogin relay script (reads all settings from `relay.env`) |
 | `relay/Dockerfile`, `relay/requirements.txt` | yes | Builds the script into a small image, run as an unprivileged user |
 | `postfix/Dockerfile`, `postfix/entrypoint.sh` | yes | Postfix image; config is assembled at start |
 | `postfix/config/main.cf` | yes | Postfix settings (no secrets) |
 | `postfix/manage-logins.sh` | yes | Add / remove / list sender logins |
+| `opendkim/` | yes | DKIM signer image (`genkey` / `showkey` / `run`) |
 | `fail2ban/`, `logrotate/` | yes | Host-side config templates (`@STACK_DIR@` = where the repo lives) |
 | `install-host-config.sh` | yes | Fills in the path and installs those into `/etc`, checks them, restarts fail2ban |
 | `.env` ← `.env.example` | **no** | `MYHOSTNAME` |
 | `relay.env` ← `relay.env.example` | **no** | Relay script settings: SimpleLogin API key, upstream login, internal login |
 | `secrets/relay_login` ← `.example` | **no** | Postfix's login to the script (matches `relay.env`) |
 | `postfix/config/sender_login` ← `.example` | **no** | Which login may send as which address |
+| `dkim/` | **no** | DKIM private key (direct delivery), created by `genkey` |
 | Docker volume `sasl-db` | — | Sender logins (Cyrus sasldb; root-only, passwords stored in plain form inside the volume) |
 | Docker volume `postfix-spool` | — | Mail queue |
 
