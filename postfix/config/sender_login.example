@@ -1,0 +1,7 @@
+# Copy to sender_login (gitignored).
+# Which login may send as which address. One address per line:
+#   <MAIL FROM address>    <login>[,<login>...]
+# Any sender not listed here is rejected, as is a login using someone else's address.
+# Postfix reports logins with the realm appended (login@MYHOSTNAME), so list both forms.
+pve@example.com          relay-pve, relay-pve@smtp.example.com
+nextcloud@example.com    relay-nextcloud, relay-nextcloud@smtp.example.com

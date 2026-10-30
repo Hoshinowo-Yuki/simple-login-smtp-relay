@@ -1,10 +1,42 @@
+# SimpleLogin SMTP relay, fronted by Postfix
+#
+#   senders ──587 (TLS + login)──► postfix (host network)
+#                                     │  127.0.0.1:8025 (internal login)
+#                                     ▼
+#                                  smtp-relay (relay/server.py: SimpleLogin reverse aliases)
+#                                     │
+#                                     ▼
+#                                  upstream mailbox ──► SimpleLogin ──► recipient
+#
+# Secrets live only in gitignored files: .env, relay.env, secrets/relay_login,
+# postfix/config/sender_login, and the SASL user database (Docker volume).
+
 services:
   smtp-relay:
-    image: ghcr.io/<your-username>/simple-login-smtp-relay:latest
+    build: ./relay                # server.py + utils.py, built locally
     container_name: smtp-relay
     restart: unless-stopped
+    env_file: relay.env
     ports:
-      - "8025:8025"
-    env_file: .env
+      - "127.0.0.1:8025:8025"     # loopback only: reachable by Postfix, not the internet
+
+  postfix:
+    build: ./postfix
+    container_name: smtp-postfix
+    restart: unless-stopped
+    network_mode: host            # sees real client IPs (IPv4 + IPv6) for limits and fail2ban
+    environment:
+      MYHOSTNAME: ${MYHOSTNAME:?set MYHOSTNAME in .env}
     volumes:
-      - ./certs:/certs:ro
+      - ./postfix/config:/config:ro             # main.cf, sender_login
+      - ./secrets:/secrets:ro                   # relay_login (Postfix -> script)
+      - /etc/letsencrypt:/etc/letsencrypt:ro    # certificate for $MYHOSTNAME
+      - ./logs:/var/log/postfix                 # postfix.log, read by fail2ban
+      - postfix-spool:/var/spool/postfix        # the queue survives restarts
+      - sasl-db:/var/lib/sasl                   # sender logins (Cyrus sasldb, root-only volume)
+    depends_on:
+      - smtp-relay
+
+volumes:
+  postfix-spool: {}
+  sasl-db: {}

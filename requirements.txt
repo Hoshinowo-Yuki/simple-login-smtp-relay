@@ -1,8 +1,0 @@
-aiosmtpd>=1.4.6
-requests>=2.31.0
-atpublic
-attrs
-urllib3
-idna
-certifi
-charset-normalizer

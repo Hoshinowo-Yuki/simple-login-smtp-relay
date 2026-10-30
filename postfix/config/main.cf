@@ -1,0 +1,64 @@
+# Postfix: public submission edge for the SimpleLogin relay.
+# myhostname and the certificate paths are set from $MYHOSTNAME by entrypoint.sh.
+compatibility_level = 3.6
+
+# --- Identity / no local mail -------------------------------------------------
+mydestination =
+mynetworks = 127.0.0.0/8 [::1]/128
+inet_interfaces = all
+inet_protocols = all
+local_transport = error:local delivery is disabled
+alias_maps =
+alias_database =
+biff = no
+append_dot_mydomain = no
+
+# --- Next hop: the SimpleLogin relay script (loopback only) -------------------
+relayhost = [127.0.0.1]:8025
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = texthash:/etc/postfix/relay_login
+smtp_sasl_security_options = noanonymous
+smtp_tls_security_level = none
+
+# --- Incoming: TLS ------------------------------------------------------------
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_protocols = >=TLSv1.2
+smtpd_tls_mandatory_protocols = >=TLSv1.2
+
+# --- Incoming: logins (Cyrus SASL, sasldb) ------------------------------------
+# Debian's Postfix doesn't default to this; without it Cyrus ignores smtpd.conf
+# (wrong database path, every mechanism offered).
+cyrus_sasl_config_path = /etc/postfix/sasl
+smtpd_sasl_type = cyrus
+smtpd_sasl_path = smtpd
+smtpd_sasl_local_domain = $myhostname
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_authenticated_header = no
+broken_sasl_auth_clients = no
+
+# Which login may use which MAIL FROM address (see sender_login)
+smtpd_sender_login_maps = texthash:/config/sender_login
+
+# --- Limits (per client IP) ----------------------------------------------------
+anvil_rate_time_unit = 3600s
+smtpd_client_connection_rate_limit = 60
+smtpd_client_message_rate_limit = 100
+smtpd_client_recipient_rate_limit = 200
+smtpd_client_auth_rate_limit = 20
+smtpd_recipient_limit = 20
+message_size_limit = 26214400
+
+# --- Hygiene ------------------------------------------------------------------
+disable_vrfy_command = yes
+smtpd_helo_required = yes
+smtpd_banner = $myhostname ESMTP
+
+# --- Queue --------------------------------------------------------------------
+maximal_queue_lifetime = 7d
+# Bounce notices have an empty sender, which the relay script can't map to an
+# alias; don't keep retrying them.
+bounce_queue_lifetime = 1h
+
+# --- Logging (read by fail2ban on the host) ----------------------------------
+maillog_file = /var/log/postfix/postfix.log

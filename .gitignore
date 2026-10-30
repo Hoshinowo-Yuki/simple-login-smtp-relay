@@ -1,4 +1,7 @@
+# Secrets and local state — never commit these
 .env
-__pycache__/
-*.pyc
-certs/
+relay.env
+secrets/*
+!secrets/*.example
+postfix/config/sender_login
+logs/
