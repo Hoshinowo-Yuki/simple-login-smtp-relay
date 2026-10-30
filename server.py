@@ -1,5 +1,7 @@
 import os
 import ssl
+import hmac
+import time
 import email
 import email.utils
 import smtplib
@@ -11,7 +13,7 @@ import logging
 from aiosmtpd.controller import Controller
 from aiosmtpd.smtp import AuthResult, LoginPassword
 
-from utils import SimpleLoginClient
+from utils import SimpleLoginClient, TemporaryError, PermanentError, AliasNotFound
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -34,6 +36,7 @@ TLS_KEY = os.getenv("TLS_KEY", "")
 # SimpleLogin config
 SL_API_URL = os.getenv("SL_API_URL", "https://app.simplelogin.io")
 SL_API_KEY = os.getenv("SL_API_KEY")
+SL_API_TIMEOUT = float(os.getenv("SL_API_TIMEOUT", "10"))
 
 # Upstream SMTP config
 UPSTREAM_HOST = os.getenv("UPSTREAM_HOST", "smtp.gmail.com")
@@ -43,6 +46,9 @@ UPSTREAM_PASSWORD = os.getenv("UPSTREAM_PASSWORD")
 UPSTREAM_STARTTLS = os.getenv("UPSTREAM_STARTTLS", "true").lower() == "true"
 
 # Timeout config
+# DATA_TIMEOUT is a deadline for the lookup phase: if it passes before anything has
+# been sent upstream, the message is deferred (451) so the client retries later.
+# Once the upstream send has started it is never interrupted (no duplicates).
 DATA_TIMEOUT = int(os.getenv("DATA_TIMEOUT", "30"))
 UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "15"))
 
@@ -73,43 +79,56 @@ class Authenticator:
         if not isinstance(auth_data, LoginPassword):
             return AuthResult(success=False, handled=False)
 
-        username = auth_data.login.decode("utf-8")
-        password = auth_data.password.decode("utf-8")
+        # constant-time comparison of both fields
+        user_ok = hmac.compare_digest(auth_data.login, RELAY_USERNAME.encode("utf-8"))
+        pass_ok = hmac.compare_digest(auth_data.password, RELAY_PASSWORD.encode("utf-8"))
+        username = auth_data.login.decode("utf-8", errors="replace")
 
-        if username == RELAY_USERNAME and password == RELAY_PASSWORD:
+        if user_ok and pass_ok:
             logger.debug(f"Auth success for {username}")
             return AuthResult(success=True)
 
-        logger.warning(f"Auth failed for {username}")
+        peer = session.peer[0] if session.peer else "unknown"
+        logger.warning(f"Auth failed for {username} from {peer}")
         return AuthResult(success=False, handled=False)
 
 
 class RelayHandler:
     async def handle_DATA(self, server, session, envelope):
+        deadline = time.monotonic() + DATA_TIMEOUT
         try:
-            return await asyncio.wait_for(
-                self._process(envelope),
-                timeout=DATA_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"handle_DATA timed out after {DATA_TIMEOUT}s")
-            return "451 Timeout processing mail"
+            # blocking work (SimpleLogin API, upstream SMTP) runs in a worker thread,
+            # so one slow call never freezes the other connections
+            return await asyncio.to_thread(self._process, envelope, deadline)
+        except PermanentError as e:
+            logger.error(f"Rejected (permanent): {e}")
+            code = "550 5.7.1" if isinstance(e, AliasNotFound) else "550 5.1.0"
+            return f"{code} {e}"
+        except TemporaryError as e:
+            logger.warning(f"Deferred (temporary): {e}")
+            return f"451 4.4.0 {e}"
         except Exception as e:
             logger.error(f"Unexpected error: {e}", exc_info=True)
-            return "451 Internal error"
+            return "451 4.3.0 Internal error"
 
-    async def _process(self, envelope):
-        mail_from = envelope.mail_from
+    def _process(self, envelope, deadline):
+        mail_from = envelope.mail_from or ""
         rcpt_tos = list(envelope.rcpt_tos)
         data = envelope.content
 
-        logger.info(f"Received mail from={mail_from} to={rcpt_tos}")
+        logger.info(f"Received mail from={mail_from or '<>'} to={rcpt_tos}")
+
+        # Bounce notices (empty sender) can't be mapped to an alias
+        if mail_from in ("", "<>"):
+            raise PermanentError("Empty sender (bounce) not accepted")
 
         msg = email.message_from_bytes(data)
 
         # Build reverse alias mapping
         alias_map = {}
         for rcpt in rcpt_tos:
+            if time.monotonic() > deadline:
+                raise TemporaryError(f"Lookups exceeded {DATA_TIMEOUT}s; nothing sent, retry later")
             reverse_alias = sl_client.get_reverse_alias(mail_from, rcpt)
             alias_map[rcpt] = reverse_alias
             logger.info(f"  {rcpt} -> {reverse_alias}")
@@ -131,23 +150,51 @@ class RelayHandler:
         if "Bcc" in msg:
             del msg["Bcc"]
 
-        # Forward via upstream SMTP 
+        # Forward via upstream SMTP
         # Extract bare email from reverse aliases
         new_rcpts = []
         for reverse in alias_map.values():
             _, addr = email.utils.parseaddr(reverse)
             new_rcpts.append(addr)
 
-        with smtplib.SMTP(UPSTREAM_HOST, UPSTREAM_PORT, timeout=UPSTREAM_TIMEOUT) as client:
-            client.ehlo()
-            if UPSTREAM_STARTTLS:
-                client.starttls()
-                client.ehlo()
-            client.login(UPSTREAM_USERNAME, UPSTREAM_PASSWORD)
-            client.sendmail(mail_from, new_rcpts, msg.as_bytes())
+        if time.monotonic() > deadline:
+            raise TemporaryError(f"Lookups exceeded {DATA_TIMEOUT}s; nothing sent, retry later")
 
-        logger.info("Relayed successfully")
+        refused = self._send_upstream(mail_from, new_rcpts, msg.as_bytes())
+
+        if refused:
+            # Some (not all) recipients were refused upstream. The others already got
+            # the mail, so retrying would duplicate it: report success, but log loudly.
+            logger.warning(f"Relayed, but upstream refused {len(refused)} recipient(s): {refused}")
+        else:
+            logger.info("Relayed successfully")
         return "250 OK"
+
+    def _send_upstream(self, mail_from, rcpts, data):
+        """Send via the upstream mailbox; SMTP errors classified as temporary or permanent."""
+        try:
+            with smtplib.SMTP(UPSTREAM_HOST, UPSTREAM_PORT, timeout=UPSTREAM_TIMEOUT) as client:
+                client.ehlo()
+                if UPSTREAM_STARTTLS:
+                    client.starttls()
+                    client.ehlo()
+                client.login(UPSTREAM_USERNAME, UPSTREAM_PASSWORD)
+                return client.sendmail(mail_from, rcpts, data)
+        except smtplib.SMTPAuthenticationError as e:
+            # wrong upstream credentials: a config problem, keep the mail and retry
+            raise TemporaryError(f"Upstream login failed ({e.smtp_code})") from e
+        except smtplib.SMTPRecipientsRefused as e:
+            codes = [code for code, _ in e.recipients.values()]
+            if all(500 <= code < 600 for code in codes):
+                raise PermanentError(f"Upstream refused all recipients: {e.recipients}") from e
+            raise TemporaryError(f"Upstream deferred recipients: {e.recipients}") from e
+        except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as e:
+            if 500 <= e.smtp_code < 600:
+                raise PermanentError(f"Upstream rejected the message ({e.smtp_code}): {e.smtp_error!r}") from e
+            raise TemporaryError(f"Upstream deferred the message ({e.smtp_code}): {e.smtp_error!r}") from e
+        except (smtplib.SMTPException, OSError) as e:
+            # disconnects, timeouts, DNS/network errors
+            raise TemporaryError(f"Upstream unavailable: {e}") from e
 
     def _replace_addresses(self, header_value: str, alias_map: dict) -> str:
         """Parse addresses from header and replace with reverse aliases."""
@@ -166,7 +213,7 @@ def main():
     global sl_client
 
     validate_config()
-    sl_client = SimpleLoginClient(SL_API_URL, SL_API_KEY)
+    sl_client = SimpleLoginClient(SL_API_URL, SL_API_KEY, timeout=SL_API_TIMEOUT)
 
     handler = RelayHandler()
     authenticator = Authenticator()
@@ -191,7 +238,7 @@ def main():
     logger.info(f"Listening on {RELAY_HOST}:{RELAY_PORT}")
     logger.info(f"Upstream: {UPSTREAM_HOST}:{UPSTREAM_PORT} (STARTTLS={'on' if UPSTREAM_STARTTLS else 'off'})")
     logger.info(f"TLS: {'enabled' if TLS_ENABLED else 'disabled'}")
-    logger.info(f"Timeouts: DATA={DATA_TIMEOUT}s UPSTREAM={UPSTREAM_TIMEOUT}s")
+    logger.info(f"Timeouts: DATA={DATA_TIMEOUT}s UPSTREAM={UPSTREAM_TIMEOUT}s SL_API={SL_API_TIMEOUT}s")
 
     # Graceful shutdown
     shutdown_event = threading.Event()
