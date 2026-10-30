@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-30
+
 ### Added
 
 - `UPSTREAM_FROM` setting: when set, the relay sends upstream as this address (envelope
@@ -117,5 +119,6 @@ Deployment is now a `docker compose` stack built from source.
 - License.
 
 [Unreleased]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.0.0...HEAD
+[2.1.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/OWNER/simple-login-smtp-relay/releases/tag/v1.0.0

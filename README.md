@@ -54,6 +54,12 @@ swapping the `UPSTREAM_*` lines together.
 
 Recipients always see the alias: SimpleLogin rewrites the sender when it forwards through the reverse alias.
 
+> [!WARNING]
+> Don't use the same account as both upstream and destination. If mail ends up in the same
+> mailbox account it was sent from (e.g. Proton as upstream, and the recipient alias forwards to
+> that Proton account), the provider sees its own sent message coming back and won't show it in
+> the inbox. Use a separate account for sending, such as a dedicated Gmail.
+
 ## Files
 
 | Path | In git? | Purpose |
