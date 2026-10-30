@@ -29,6 +29,31 @@ answers `250`. On `4xx` it retries (up to 7 days).
 SimpleLogin and upstream calls run in a worker thread with real timeouts, so a slow call
 never blocks other connections. Unknown senders are remembered for 5 minutes.
 
+## Upstream mailbox
+
+The script sends everything through one SMTP account (`UPSTREAM_*` in `relay.env`). SimpleLogin
+only accepts mail to a reverse alias from one of that alias's mailboxes, or from an **authorized
+address** of one of those mailboxes. So the address the script sends as must be one of these
+for every alias you send as:
+
+- **Recommended: an authorized address** on the mailbox your aliases already use (SimpleLogin →
+  Mailboxes → that mailbox → Authorized addresses). One setting, covers every alias on that
+  mailbox (including future ones), and doesn't change where incoming mail goes.
+- Or a mailbox attached to each alias. This works too, but every mailbox on an alias receives a
+  copy of its incoming mail, and each new alias needs it attached.
+
+**Set `UPSTREAM_FROM` to the same address as `UPSTREAM_USERNAME`.** This is recommended for
+every upstream, and required for some. The script then always sends as the upstream account's
+own address, so it behaves the same with every provider, and switching providers is just
+swapping the `UPSTREAM_*` lines together.
+
+| Upstream | Settings | `UPSTREAM_FROM` |
+| --- | --- | --- |
+| Proton Mail | `smtp.protonmail.ch:587`, username = a custom-domain address, password = an SMTP token for it | **Required**: the token's address. Without it Proton refuses with `553 … Sender address rejected: not owned by user` |
+| Gmail | `smtp.gmail.com:587`, an app password | Recommended: the Gmail address. Left empty it still works, because Gmail rewrites the sender itself |
+
+Recipients always see the alias: SimpleLogin rewrites the sender when it forwards through the reverse alias.
+
 ## Files
 
 | Path | In git? | Purpose |
@@ -125,16 +150,17 @@ smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt       # some distros (e.g. 
 
 ## Tests (from outside)
 
-With [swaks](https://jetmore.org/john/code/swaks/) — leave out the password so it prompts, and don't
-share terminal output while the prompt is visible (swaks echoes what you paste):
+With [swaks](https://jetmore.org/john/code/swaks/) — leave out the password so it prompts, and always
+use `-hs` (`--hide-send`): without it swaks prints the AUTH exchange, and the line after
+`334 UGFzc3dvcmQ6` is the password, only base64-encoded.
 
 ```bash
-H="--server smtp.example.com --port 587"
+H="-hs --server smtp.example.com --port 587"
 swaks $H --tls --auth LOGIN --auth-user relay-x --quit-after AUTH                                          # wrong password
 swaks $H --tls --auth LOGIN --auth-user relay-x --from other@example.com --to t@example.org --quit-after RCPT
 swaks $H --tls --from x@example.com --to t@example.org --quit-after RCPT                                   # no login
 swaks $H --auth LOGIN --auth-user relay-x --quit-after AUTH                                                # no TLS
-swaks --server smtp.example.com --port 465 --tlsc --auth LOGIN --auth-user relay-x --from x@example.com --to t@example.org --quit-after RCPT   # implicit TLS
+swaks -hs --server smtp.example.com --port 465 --tlsc --auth LOGIN --auth-user relay-x --from x@example.com --to t@example.org --quit-after RCPT   # implicit TLS
 ```
 
 | Test | Expected |
@@ -167,6 +193,7 @@ outside the VM (e.g. your provider's cloud firewall). Allow `587/tcp` and `465/t
 | `smtp-relay` restarts, `Permission denied` on `server.py` | Files not readable by the container user | The Dockerfile uses `COPY --chmod=644`; rebuild with `docker compose up -d --build smtp-relay` |
 | `454 4.7.0 Temporary authentication failure`; log: `unable to open Berkeley db /etc/sasldb2` | Postfix not reading `/etc/postfix/sasl/smtpd.conf` | `cyrus_sasl_config_path = /etc/postfix/sasl` in `main.cf` (already set) |
 | `saslpasswd2`: `BDB0004 … unexpected file type or format` | An empty `sasldb2` file exists | Delete it; only `saslpasswd2` should create it (the entrypoint removes empty ones) |
+| Script log: `Upstream refused all recipients … 553 … not owned by user` | Upstream only accepts its own address as sender (e.g. Proton) | Set `UPSTREAM_FROM` to the upstream address; rebuild `smtp-relay` |
 | `535 … authentication failed` | Client and relay hold different passwords | Re-enter on the client, or reset with `manage-logins.sh add <login>` |
 | `553 … not owned by user relay-x@smtp.example.com` | The From address isn't listed for that login | Fix the client's From, or add it to `sender_login` (with both login forms) |
 | Client: `Server certificate not verified` | Client has no CA list configured | e.g. Postfix `smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt` |

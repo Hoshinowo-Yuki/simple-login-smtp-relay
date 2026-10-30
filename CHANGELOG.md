@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `UPSTREAM_FROM` setting: when set, the relay sends upstream as this address (envelope
+  sender and `From` header, keeping the display name; `Sender` and `Return-Path` removed).
+  Needed for upstreams that only accept their own address, such as Proton Mail SMTP
+  tokens. Unset, behaviour is unchanged. Recipients still see the alias, because
+  SimpleLogin rewrites the sender when it forwards through the reverse alias.
+  Recommended for every upstream (set it to the `UPSTREAM_USERNAME` address); required for
+  Proton Mail.
+  SimpleLogin must accept the address for your aliases: add it as an authorized address
+  on their mailbox (recommended) or attach it as one of their mailboxes.
+
 ## [2.0.0] - 2026-10-30
 
 This release puts Postfix in front of the relay script. The script no longer faces the
@@ -104,6 +116,6 @@ Deployment is now a `docker compose` stack built from source.
 - Container image built by GitHub Actions and published to GHCR.
 - License.
 
-[Unreleased]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/compare/v1.0.0...v2.0.0
-[1.0.0]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/releases/tag/v1.0.0
+[Unreleased]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/OWNER/simple-login-smtp-relay/releases/tag/v1.0.0

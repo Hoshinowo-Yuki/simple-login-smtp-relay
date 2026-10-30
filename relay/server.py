@@ -44,6 +44,12 @@ UPSTREAM_PORT = int(os.getenv("UPSTREAM_PORT", "587"))
 UPSTREAM_USERNAME = os.getenv("UPSTREAM_USERNAME")
 UPSTREAM_PASSWORD = os.getenv("UPSTREAM_PASSWORD")
 UPSTREAM_STARTTLS = os.getenv("UPSTREAM_STARTTLS", "true").lower() == "true"
+# Optional: send upstream as this address (envelope sender + From header).
+# Needed for providers that only allow the account's own address (e.g. Proton SMTP
+# tokens); it must be a SimpleLogin mailbox of the aliases. Gmail rewrites the sender
+# itself, so it works without this. Recipients still see the alias: SimpleLogin
+# rewrites From when it forwards through the reverse alias.
+UPSTREAM_FROM = os.getenv("UPSTREAM_FROM", "").strip()
 
 # Timeout config
 # DATA_TIMEOUT is a deadline for the lookup phase: if it passes before anything has
@@ -160,7 +166,16 @@ class RelayHandler:
         if time.monotonic() > deadline:
             raise TemporaryError(f"Lookups exceeded {DATA_TIMEOUT}s; nothing sent, retry later")
 
-        refused = self._send_upstream(mail_from, new_rcpts, msg.as_bytes())
+        upstream_from = mail_from
+        if UPSTREAM_FROM:
+            display_name, _ = email.utils.parseaddr(msg.get("From", ""))
+            del msg["From"]
+            msg["From"] = email.utils.formataddr((display_name, UPSTREAM_FROM))
+            for header in ("Sender", "Return-Path"):
+                del msg[header]
+            upstream_from = UPSTREAM_FROM
+
+        refused = self._send_upstream(upstream_from, new_rcpts, msg.as_bytes())
 
         if refused:
             # Some (not all) recipients were refused upstream. The others already got
@@ -236,7 +251,8 @@ def main():
 
     controller.start()
     logger.info(f"Listening on {RELAY_HOST}:{RELAY_PORT}")
-    logger.info(f"Upstream: {UPSTREAM_HOST}:{UPSTREAM_PORT} (STARTTLS={'on' if UPSTREAM_STARTTLS else 'off'})")
+    logger.info(f"Upstream: {UPSTREAM_HOST}:{UPSTREAM_PORT} (STARTTLS={'on' if UPSTREAM_STARTTLS else 'off'})"
+                f" sending as {UPSTREAM_FROM or 'the original sender'}")
     logger.info(f"TLS: {'enabled' if TLS_ENABLED else 'disabled'}")
     logger.info(f"Timeouts: DATA={DATA_TIMEOUT}s UPSTREAM={UPSTREAM_TIMEOUT}s SL_API={SL_API_TIMEOUT}s")
 
