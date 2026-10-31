@@ -143,7 +143,7 @@ There are no published images: both are built from this repo on your own host
 - Docker with the compose plugin
 - A DNS name (e.g. `smtp.example.com`) pointing at the host — **not proxied** if you use Cloudflare
 - A certificate for that name in `/etc/letsencrypt/live/<name>/` (e.g. certbot with the Cloudflare DNS plugin)
-- Firewall: allow **587/tcp** and **465/tcp** (IPv4 + IPv6); keep 25 and 8025 closed
+- Firewall: allow **587/tcp** and **465/tcp** inbound (IPv4 + IPv6); keep 25 and 8025 closed inbound. Direct delivery also needs **outbound** port 25
 
 ## Setup
 
@@ -233,7 +233,7 @@ swaks -hs --server smtp.example.com --port 465 --tlsc --auth LOGIN --auth-user r
 | No login | `554 5.7.1 … Client host rejected: Access denied` |
 | `AUTH` before `STARTTLS` | not offered |
 | Port 465 with `--tlsc` | TLS handshake first, then the same results as 587 |
-| Port 25 / 8025 from outside | closed / filtered |
+| Ports 25, 8025, 10026, 8891 from outside | closed / filtered (Postfix has no port-25 listener; the others are loopback only) |
 
 Check fail2ban recognises failures in this log format:
 
@@ -245,7 +245,8 @@ fail2ban-regex logs/postfix.log 'postfix[mode=auth]' | grep -E "^Lines|Failregex
 
 Ports published by Docker (`ports:`) bypass `ufw`, because Docker inserts its own rules ahead of it.
 The relay script is published on `127.0.0.1` only, so it is never reachable from outside, and Postfix
-uses the host network (so `ufw` does apply to it). For anything else on the host, prefer a firewall
+uses the host network (so `ufw` does apply to it). The relay script (8025), the re-injection port (10026) and
+OpenDKIM (8891) all listen on `127.0.0.1` only. For anything else on the host, prefer a firewall
 outside the VM (e.g. your provider's cloud firewall). Allow `587/tcp` and `465/tcp` for IPv4 and IPv6.
 
 ## Troubleshooting

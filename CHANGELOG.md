@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-31
+
 ### Added
 
 - Direct delivery: the relay script can hand rewritten mail back to Postfix on
@@ -31,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside.
 - The upstream login is optional: set both `UPSTREAM_USERNAME` and `UPSTREAM_PASSWORD`, or
   neither.
+- README: "Direct delivery" section; the tests and firewall notes list the loopback-only
+  ports (8025, 10026, 8891) and that direct delivery needs outbound port 25.
 
 ## [2.1.0] - 2026-10-30
 
@@ -143,7 +147,8 @@ Deployment is now a `docker compose` stack built from source.
 - Container image built by GitHub Actions and published to GHCR.
 - License.
 
-[Unreleased]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.1.0...HEAD
-[2.1.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/OWNER/simple-login-smtp-relay/compare/v1.0.0...v2.0.0
-[1.0.0]: https://github.com/OWNER/simple-login-smtp-relay/releases/tag/v1.0.0
+[Unreleased]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/Hoshinowo-Yuki/simple-login-smtp-relay/releases/tag/v1.0.0
