@@ -212,9 +212,13 @@ smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt       # some distros (e.g. 
 
 ## Tests (from outside)
 
-With [swaks](https://jetmore.org/john/code/swaks/) — leave out the password so it prompts, and always
-use `-hs` (`--hide-send`): without it swaks prints the AUTH exchange, and the line after
-`334 UGFzc3dvcmQ6` is the password, only base64-encoded.
+With [swaks](https://jetmore.org/john/code/swaks/)
+
+> [!WARNING]
+> Leave out the password so it prompts.
+>
+> Always use `-hs` (`--hide-send`): without it swaks prints the AUTH exchange
+> inside your terminal, which could **accidentally expose the password itself**, since it is only base64-encoded.
 
 ```bash
 H="-hs --server smtp.example.com --port 587"
@@ -262,3 +266,12 @@ outside the VM (e.g. your provider's cloud firewall). Allow `587/tcp` and `465/t
 | Client: `Server certificate not verified` | Client has no CA list configured | e.g. Postfix `smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt` |
 | Script replies `550` | Permanent: sender isn't a SimpleLogin alias, empty sender, SimpleLogin 4xx, upstream 5xx | See `docker compose logs smtp-relay` |
 | Script replies `451` | Temporary: SimpleLogin/upstream down or slow, bad API key or upstream login | Postfix retries automatically (up to 7 days) |
+
+## Credits
+
+The relay script was originally inspired by [leoleoasd/simple-login-smtp-relay](https://github.com/leoleoasd/simple-login-smtp-relay),
+which served as a reference; this project is an independent rewrite.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
